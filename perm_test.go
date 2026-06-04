@@ -39,9 +39,9 @@ func BenchmarkPRF(b *testing.B) {
 
 func BenchmarkFeistel(b *testing.B) {
 	p, _ := New(100, 12345)
-	seed, mask, halfK := p.seed, p.mask, p.halfK
+	rk, mask, halfK := p.rk, p.mask, p.halfK
 	for b.Loop() {
-		feistel(10, halfK, mask, seed)
+		feistel(10, halfK, mask, rk)
 	}
 }
 
