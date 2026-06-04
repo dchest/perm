@@ -1,77 +1,145 @@
+// Package perm implements a seekable permutation.
 package perm
 
 import (
-	"errors"
 	"math/bits"
 )
 
-// Perm is a non-cryptographic permutation.
+// Perm is a non-cryptographic seekable permutation.
+//
+// It maps an integer in a given range into an integer
+// from the same range.
+//
+// It is a virtual pseudorandom shuffle of all values 0, 1, 2, ...
+// up to the given length, but generates values at indexes
+// dynamically instead of shuffling in memory.
+//
+// It can also be considered a pseudorandom number generator,
+// except none of the generated numbers repeat, e.g. given the length 3
+// indexes [0, 1, 2] will generate something like [2, 0, 1].
+//
+// It can also be considered an insecure format-preserving encryption,
+// and in fact is based on a cycle-walked Feistel network with a weak PRF.
 type Perm struct {
-	vmax, halfK, mask uint32
-	rk                [4]uint32
+	rk          [4]uint32 // Feistel subkeys derived from seed
+	halfK, mask uint32    // helpers for forcing into the range
+	maxi        uint      // maximum index (length-1)
 }
 
 // New creates a seeded permutation of [0..length-1].
-func New(length uint32, seed uint64) (Perm, error) {
+//
+// It panics if length is negative or zero.
+func New(length int, seed uint64) Perm {
 	if length <= 0 {
-		return Perm{}, errors.New("length cannot be negative or zero")
+		panic("length cannot be negative or zero")
 	}
-	vmax := length - 1
-	// Calculate the smallest even bit-length that can hold vmax
-	k := bits.Len32(vmax)
+	vmax := uint(length - 1)
+
+	// Calculate the smallest even bitlength that can hold vmax.
+	k := bits.Len(vmax)
 	if k%2 != 0 {
 		k++
 	}
 	halfK := uint32(k / 2)
-	mask := uint32(1<<halfK) - 1
+	mask := uint32((uint64(1) << halfK) - 1)
 
+	// SHA256/BLAKE IV xored into seed to generate round keys.
+	// "first 32 bits of the fractional parts of the square
+	// roots of the first primes"
 	const (
-		// SHA256/BLAKE IV xored into seed to generate round keys
-		// "first 32 bits of the fractional parts of the square roots of the first primes"
-		r1 = 0x6a09e667
-		r2 = 0xbb67ae85
-		r3 = 0x3c6ef372
-		r4 = 0xa54ff53a
+		r0 = 0x6a09e667
+		r1 = 0xbb67ae85
+		r2 = 0x3c6ef372
+		r3 = 0xa54ff53a
 	)
 
 	sl := uint32(seed)
 	sh := uint32(seed >> 32)
 
 	return Perm{
-		vmax:  vmax,
+		maxi:  vmax,
 		halfK: halfK,
 		mask:  mask,
 		rk: [4]uint32{
-			r1 ^ sl,
-			r2 ^ sh,
-			r3 ^ sl,
-			r4 ^ sh,
+			r0 ^ sl,
+			r1 ^ sh,
+			r2 ^ sl,
+			r3 ^ sh,
 		},
-	}, nil
+	}
 }
 
-// At generates the value of the permutation [0...length-1]
-// at the given index.
+// At generates the value of the permutation at the given index.
 //
-// If i is outside the range, it panics.
-func (p Perm) At(index uint32) uint32 {
-	if index > p.vmax || p.vmax == 0 {
-		panic("index outside of the range")
+// It panics if the given index is outside the range.
+func (p Perm) At(index int) int {
+	if index < 0 || uint(index) > p.maxi {
+		panic("Perm.At: index outside of the range")
 	}
+	v := uint(index)
 	for {
-		index = feistel(index, p.halfK, p.mask, p.rk)
-		if index <= p.vmax {
-			return index
+		v = feistelEnc(v, p.halfK, p.mask, &p.rk)
+		// if in the range, return it, otherwise
+		// cycle walk to force v into the range.
+		if v <= p.maxi {
+			return int(v)
 		}
-		// otherwise, cycle walk to force v into the range.
 	}
+}
+
+// Index generates the inverse of At.
+//
+// In other terms, it "finds" the index of the given value.
+//
+// If the given value is outside the range, it returns -1, false.
+func (p Perm) Index(value int) (index int, ok bool) {
+	if value < 0 || uint(value) > p.maxi {
+		return -1, false
+	}
+	idx := uint(value)
+	for {
+		idx = feistelDec(idx, p.halfK, p.mask, &p.rk)
+		if idx <= p.maxi {
+			return int(idx), true
+		}
+	}
+}
+
+// feistelEnc encodes v with a 4-round Feistel network.
+//
+// It returns a permutation of v limited to halfK*2 bits
+// mixed with the given round keys.
+func feistelEnc(v uint, halfK, mask uint32, rk *[4]uint32) uint {
+	l, r := uint32(v>>halfK)&mask, uint32(v)&mask
+	l, r = fr(l, r, rk[0], mask)
+	l, r = fr(l, r, rk[1], mask)
+	l, r = fr(l, r, rk[2], mask)
+	l, r = fr(l, r, rk[3], mask)
+	return uint(l)<<halfK | uint(r)
+}
+
+// feistelDec decodes v with a 4-round Feistel network.
+func feistelDec(v uint, halfK, mask uint32, rk *[4]uint32) uint {
+	l, r := uint32(v>>halfK)&mask, uint32(v)&mask
+	r, l = fr(r, l, rk[3], mask)
+	r, l = fr(r, l, rk[2], mask)
+	r, l = fr(r, l, rk[1], mask)
+	r, l = fr(r, l, rk[0], mask)
+	return uint(l)<<halfK | uint(r)
+}
+
+// fr applies a Feistel round.
+func fr(l, r, rk, mask uint32) (L, R uint32) {
+	return r, l ^ (prf(r, rk) & mask)
 }
 
 // prf mixes bits of v, MurmurHash/XXH32-style.
 // Fixed point prf(0, 0)=0 doesn't matter.
+// Also prf(x, y)==prf(y, x).
+// It is reversible, thus in fact a PRP.
 func prf(v, k uint32) uint32 {
+	// XXH32 constants, chosen empirically
 	const (
-		// XXH32 constants, chosen empirically
 		prime2 = 0x85ebca77
 		prime3 = 0xc2b2ae3d
 	)
@@ -82,17 +150,4 @@ func prf(v, k uint32) uint32 {
 	h *= prime3
 	h ^= h >> 16
 	return h
-}
-
-// feistel is a 4-round Feistel network.
-//
-// It returns a permutation of v limited to halfK*2 bits
-// mixed with the given seed.
-func feistel(v, halfK, mask uint32, rk [4]uint32) uint32 {
-	l, r := (v>>halfK)&mask, v&mask
-	l, r = r, l^(prf(r, rk[0])&mask)
-	l, r = r, l^(prf(r, rk[1])&mask)
-	l, r = r, l^(prf(r, rk[2])&mask)
-	l, r = r, l^(prf(r, rk[3])&mask)
-	return (l << halfK) | r
 }
