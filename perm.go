@@ -5,21 +5,28 @@ import (
 	"math/bits"
 )
 
-// Perm is a non-cryptographic seekable permutation.
+// Perm is a fast non-cryptographic seekable permutation.
 //
-// It maps an integer in a given range into an integer
-// from the same range.
+// It maps an integer in a range into an integer from the same range.
 //
-// It is a virtual pseudorandom shuffle of all values 0, 1, 2, ...
-// up to the given length, but generates values at indexes
-// dynamically instead of shuffling in memory.
+// It is a virtual pseudorandom shuffle of all values 0, 1, 2, ... up to the
+// given length, but generates values at indexes dynamically instead of
+// shuffling in memory.
 //
-// It can also be considered a pseudorandom number generator,
-// except none of the generated numbers repeat, e.g. given the length 3
-// indexes [0, 1, 2] will generate something like [2, 0, 1].
+// It can also be considered a pseudorandom number generator, except none of
+// the generated numbers repeat, e.g. given the length 3 indexes [0, 1, 2] will
+// generate [0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], or [2, 1, 0],
+// depending on the seed.
 //
-// It can also be considered an insecure format-preserving encryption,
-// and in fact is based on a cycle-walked Feistel network with a weak PRF.
+//	p := perm.New(3, 42)
+//	p.At(0) // -> 2
+//	p.At(1) // -> 0
+//	p.At(2) // -> 1
+//
+// It can also be considered an insecure format-preserving encryption, where
+// At is encryption and Index is decryption in the domain of integers from 0 to
+// length-1, and in fact is based on a cycle-walked 4-round Feistel network
+// with a weak PRF.
 type Perm struct {
 	rk          [4]uint32 // Feistel subkeys derived from seed
 	halfK, mask uint32    // helpers for forcing into the range
@@ -33,10 +40,10 @@ func New(length int, seed uint64) Perm {
 	if length <= 0 {
 		panic("length cannot be negative or zero")
 	}
-	vmax := uint(length - 1)
+	maxi := uint(length - 1)
 
-	// Calculate the smallest even bitlength that can hold vmax.
-	k := bits.Len(vmax)
+	// Calculate the smallest even bit-length that can hold maxi.
+	k := bits.Len(maxi)
 	if k%2 != 0 {
 		k++
 	}
@@ -57,7 +64,7 @@ func New(length int, seed uint64) Perm {
 	sh := uint32(seed >> 32)
 
 	return Perm{
-		maxi:  vmax,
+		maxi:  maxi,
 		halfK: halfK,
 		mask:  mask,
 		rk: [4]uint32{

@@ -16,6 +16,15 @@ func TestPRF(t *testing.T) {
 	}
 }
 
+func TestExample(t *testing.T) {
+	p := New(3, 42)
+	a := [3]int{p.At(0), p.At(1), p.At(2)}
+	b := [3]int{2, 0, 1}
+	if a != b {
+		t.Logf("[0, 1, 2] -> expected %v, got %v", b, a)
+	}
+}
+
 func TestPerm(t *testing.T) {
 	n := 10
 	s := make([]int, 0, n)
