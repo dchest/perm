@@ -1,8 +1,10 @@
 package perm
 
 import (
+	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -89,6 +91,38 @@ func TestSeed(t *testing.T) {
 	}
 	if numSame > n/2 {
 		t.Fatalf("different seeds generated similar sequences: %d of %d are the same", numSame, n)
+	}
+}
+
+func TestPermVisual(t *testing.T) {
+	n := 64 * 64
+	p := New(n, 1)
+	t.Logf("Visual halves")
+	for y := 1; y < 64; y++ {
+		var line strings.Builder
+		for x := 1; x < 64; x++ {
+			if p.At(x*y) < n/2 {
+				line.WriteString(".")
+			} else {
+				line.WriteString("o")
+			}
+		}
+		t.Log(line.String())
+	}
+}
+
+func TestPermVisualBar(t *testing.T) {
+	n := 64
+	p := New(n, 1)
+	t.Logf("Visual bars")
+	for i := range n {
+		var line strings.Builder
+		fmt.Fprintf(&line, "%3d ", i)
+		v := p.At(i)
+		for range v {
+			line.WriteString("█")
+		}
+		t.Log(line.String())
 	}
 }
 
