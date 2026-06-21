@@ -27,8 +27,27 @@ func TestExample(t *testing.T) {
 	}
 }
 
+func TestPermSmall(t *testing.T) {
+	n := 4
+	s := make([]int, n)
+	p := New(n, 0)
+	for i := range s {
+		s[i] = p.At(i)
+		if idx, ok := p.Index(s[i]); !ok || idx != i {
+			t.Fatalf("wrong index at %d", i)
+		}
+	}
+	t.Logf("small: %v", s)
+	slices.Sort(s)
+	for i, v := range s {
+		if v != i {
+			t.Fatalf("wrong result at %d", i)
+		}
+	}
+}
+
 func TestPerm(t *testing.T) {
-	n := 10
+	n := 1000
 	s := make([]int, 0, n)
 	p := New(n, 12345)
 	for i := range n {
@@ -77,6 +96,29 @@ func TestBig(t *testing.T) {
 		t.Logf("%d", p.At(i))
 	}
 	t.Logf("%d", p.At(math.MaxInt-1))
+}
+
+func TestOddK(t *testing.T) {
+	lengths := []int{5, 6, 7, 8, 17, 31, 32, 33, 64, 127, 128}
+	seeds := []uint64{0, 1, 42, math.MaxUint64}
+	for _, n := range lengths {
+		for _, seed := range seeds {
+			p := New(n, seed)
+			for i := range n {
+				v := p.At(i)
+				if v < 0 || v >= n {
+					t.Fatalf("n=%d seed=%d: At(%d)=%d out of range", n, seed, i, v)
+				}
+				idx, ok := p.Index(v)
+				if !ok {
+					t.Fatalf("n=%d seed=%d: Index(%d) returned false", n, seed, v)
+				}
+				if idx != i {
+					t.Fatalf("n=%d seed=%d: At(%d)=%d, Index(%d)=%d (expected %d)", n, seed, i, v, v, idx, i)
+				}
+			}
+		}
+	}
 }
 
 func TestSeed(t *testing.T) {
@@ -134,9 +176,9 @@ func BenchmarkPRF(b *testing.B) {
 
 func BenchmarkFeistel(b *testing.B) {
 	p := New(100, 12345)
-	rk, mask, halfK := p.rk, p.mask, p.halfK
+	rk, maskL, maskR, halfK := p.rk, p.lmask, p.rmask, p.rbits
 	for b.Loop() {
-		feistelEnc(10, halfK, mask, &rk)
+		feistelEnc(10, halfK, maskL, maskR, &rk)
 	}
 }
 
@@ -157,10 +199,10 @@ func BenchmarkPerm2(b *testing.B) {
 }
 
 func BenchmarkPerm3(b *testing.B) {
-	n := 17 // requires ~4 cycle-walks
+	n := 17
 	p := New(n, 0)
 	for b.Loop() {
-		p.At(0)
+		p.At(4)
 	}
 }
 

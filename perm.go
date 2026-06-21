@@ -28,9 +28,9 @@ import (
 // length-1, and in fact is based on a cycle-walked 4-round Feistel network
 // with a weak PRF.
 type Perm struct {
-	rk          [4]uint32 // Feistel subkeys derived from seed
-	halfK, mask uint32    // helpers for forcing into the range
-	maxi        uint      // maximum index (length-1)
+	rk                  [4]uint32 // Feistel subkeys derived from seed
+	rbits, lmask, rmask uint32    // helpers for forcing into the range
+	maxi                uint      // maximum index (length-1)
 }
 
 // New creates a seeded permutation of [0..length-1].
@@ -42,13 +42,11 @@ func New(length int, seed uint64) Perm {
 	}
 	maxi := uint(length - 1)
 
-	// Calculate the smallest even bit-length that can hold maxi.
-	k := bits.Len(maxi)
-	if k%2 != 0 {
-		k++
-	}
-	halfK := uint32(k / 2)
-	mask := uint32((uint64(1) << halfK) - 1)
+	// Split bits into two halves (possibly differ by 1 bit).
+	k := uint32(bits.Len(maxi))
+	rbits := k / 2
+	rmask := uint32((uint64(1) << rbits) - 1)
+	lmask := uint32((uint64(1) << (k - rbits)) - 1)
 
 	// SHA256/BLAKE IV xored into seed to generate round keys.
 	// "first 32 bits of the fractional parts of the square
@@ -65,8 +63,9 @@ func New(length int, seed uint64) Perm {
 
 	return Perm{
 		maxi:  maxi,
-		halfK: halfK,
-		mask:  mask,
+		rbits: rbits,
+		lmask: lmask,
+		rmask: rmask,
 		rk: [4]uint32{
 			r0 ^ sl,
 			r1 ^ sh,
@@ -85,7 +84,7 @@ func (p Perm) At(index int) int {
 	}
 	v := uint(index)
 	for {
-		v = feistelEnc(v, p.halfK, p.mask, &p.rk)
+		v = feistelEnc(v, p.rbits, p.lmask, p.rmask, &p.rk)
 		// if in the range, return it, otherwise
 		// cycle walk to force v into the range.
 		if v <= p.maxi {
@@ -105,7 +104,7 @@ func (p Perm) Index(value int) (index int, ok bool) {
 	}
 	idx := uint(value)
 	for {
-		idx = feistelDec(idx, p.halfK, p.mask, &p.rk)
+		idx = feistelDec(idx, p.rbits, p.lmask, p.rmask, &p.rk)
 		if idx <= p.maxi {
 			return int(idx), true
 		}
@@ -114,25 +113,25 @@ func (p Perm) Index(value int) (index int, ok bool) {
 
 // feistelEnc encodes v with a 4-round Feistel network.
 //
-// It returns a permutation of v limited to halfK*2 bits
-// mixed with the given round keys.
-func feistelEnc(v uint, halfK, mask uint32, rk *[4]uint32) uint {
-	l, r := uint32(v>>halfK)&mask, uint32(v)&mask
-	l, r = fr(l, r, rk[0], mask)
-	l, r = fr(l, r, rk[1], mask)
-	l, r = fr(l, r, rk[2], mask)
-	l, r = fr(l, r, rk[3], mask)
-	return uint(l)<<halfK | uint(r)
+// It returns a permutation of v with the left half masked by lmask
+// and the right half masked by rmask, mixed with the given round keys.
+func feistelEnc(v uint, rbits, lmask, rmask uint32, rk *[4]uint32) uint {
+	l, r := uint32(v>>rbits)&lmask, uint32(v)&rmask
+	l, r = fr(l, r, rk[0], lmask)
+	l, r = fr(l, r, rk[1], rmask)
+	l, r = fr(l, r, rk[2], lmask)
+	l, r = fr(l, r, rk[3], rmask)
+	return uint(l)<<rbits | uint(r)
 }
 
 // feistelDec decodes v with a 4-round Feistel network.
-func feistelDec(v uint, halfK, mask uint32, rk *[4]uint32) uint {
-	l, r := uint32(v>>halfK)&mask, uint32(v)&mask
-	r, l = fr(r, l, rk[3], mask)
-	r, l = fr(r, l, rk[2], mask)
-	r, l = fr(r, l, rk[1], mask)
-	r, l = fr(r, l, rk[0], mask)
-	return uint(l)<<halfK | uint(r)
+func feistelDec(v uint, rbits, lmask, rmask uint32, rk *[4]uint32) uint {
+	l, r := uint32(v>>rbits)&lmask, uint32(v)&rmask
+	r, l = fr(r, l, rk[3], rmask)
+	r, l = fr(r, l, rk[2], lmask)
+	r, l = fr(r, l, rk[1], rmask)
+	r, l = fr(r, l, rk[0], lmask)
+	return uint(l)<<rbits | uint(r)
 }
 
 // fr applies a Feistel round.
