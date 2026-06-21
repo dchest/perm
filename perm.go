@@ -28,9 +28,9 @@ import (
 // length-1, and in fact is based on a cycle-walked 4-round Feistel network
 // with a weak PRF.
 type Perm struct {
+	maxi                uint      // maximum index (length-1)
 	rk                  [4]uint32 // Feistel subkeys derived from seed
 	rbits, lmask, rmask uint32    // helpers for forcing into the range
-	maxi                uint      // maximum index (length-1)
 }
 
 // New creates a seeded permutation of [0..length-1].
